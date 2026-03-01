@@ -1,0 +1,5 @@
+pypdf
+google-genai
+requests
+tenacity
+python-dotenv

@@ -1,0 +1,350 @@
+
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Optional, List, Any, Dict, Union
+
+from tenacity import retry, wait_exponential, stop_after_attempt
+
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
+
+from ..utils import write_text, build_paper_text_gemini
+
+SYSTEM_PROMPT = r"""
+You are a meticulous, adversarial, and objective reviewer of a theoretical computer science paper.
+Your job is NOT to praise; it is to find mistakes, logical gaps, inconsistent notation, missing assumptions,
+and places where claims are not supported by the text.
+
+Hard rules:
+- Be strictly evidence-based: every nontrivial claim you make must be grounded in the provided paper text.
+- Do not invent missing definitions, lemmas, or citations.
+- If you are not fully sure, do NOT state it as an error. Mark it with the GAP_TAG and explain what would need to be checked.
+- When you claim an error, provide a reproducible, step-by-step derivation/check that demonstrates the error.
+
+Output format (always):
+1) Summary of contributions (2–6 sentences).
+2) Errors and Improvements:
+   - Major Issues (numbered)
+   - Minor Issues (numbered)
+3) Minor corrections and typos (bullet list)
+4) “Structured Partial Progress” section: items you suspect but could not fully verify, each tagged with GAP_TAG.
+
+Mathematical rigor protocol:
+- For each major issue you report, explicitly classify it as either:
+  (A) COMPLETE_PROOF: every step checked from the provided text; or
+  (B) STRUCTURED_PARTIAL_PROGRESS: there is at least one GAP_TAG.
+- Use the tag GAP_TAG to mark any gap / unproven assumption / unverifiable step.
+- Do not rely on external folklore knowledge unless it is explicitly stated in the paper text.
+
+GAP_TAG = [GAP]
+""".strip()
+
+
+PROMPT_1 = r"""
+TASK: Produce an initial, strictly objective review of the paper.
+
+Input paper (verbatim, includes appendices if provided):
+<TITLE>
+{paper_title}
+</TITLE>
+
+<PAPER_TEXT>
+{paper_text}
+</PAPER_TEXT>
+
+Constraints:
+- Focus ONLY on identifying errors, logical gaps, missing assumptions, inconsistent variables/notation,
+  incorrect inequality applications, and places where the proof does not follow.
+- Suggest concrete improvements (e.g., “state assumption X”, “clarify definition Y”, “fix variable clash in Lemma 3.2”).
+- Do not speculate beyond what is written.
+- When referencing evidence, cite as precisely as possible, e.g. "(Page 12, Lines 40-55)" or "(Lemma 3.1, Page 7)".
+
+Return the review in the required output format.
+""".strip()
+
+
+PROMPT_2 = r"""
+TASK: Audit your previous review for hallucinations and weak claims.
+
+You must:
+- For EACH issue you raised, locate the exact supporting location in the paper (page+line preferred).
+- Re-derive or re-check the claim step-by-step using ONLY the provided paper text.
+- If an issue cannot be fully verified, downgrade it to STRUCTURED_PARTIAL_PROGRESS and tag the first unverifiable step with [GAP].
+- Remove any issue that you cannot ground in the text.
+
+Inputs:
+(1) Paper:
+<TITLE>
+{paper_title}
+</TITLE>
+
+<PAPER_TEXT>
+{paper_text}
+</PAPER_TEXT>
+
+(2) Your previous review:
+<REVIEW_V1>
+{review_v1}
+</REVIEW_V1>
+
+Output:
+A) A table-like list (plain text is ok) of issues with fields:
+   - Issue ID
+   - Original claim
+   - Evidence location in paper
+   - Verification status: COMPLETE_PROOF or STRUCTURED_PARTIAL_PROGRESS
+   - If partial: first [GAP] step and what is needed to resolve it
+B) A “patch plan”: concrete edits to apply to the review (add/remove/modify items).
+""".strip()
+
+
+PROMPT_3 = r"""
+TASK: Write a revised review that incorporates the audit results.
+
+Inputs:
+(1) Paper:
+<TITLE>
+{paper_title}
+</TITLE>
+
+<PAPER_TEXT>
+{paper_text}
+</PAPER_TEXT>
+
+(2) Original review:
+<REVIEW_V1>
+{review_v1}
+</REVIEW_V1>
+
+(3) Audit + patch plan:
+<AUDIT_V1>
+{audit_v1}
+</AUDIT_V1>
+
+Rules:
+- The revised review must remove or downgrade any unverified claims.
+- Every Major Issue must be labeled COMPLETE_PROOF or STRUCTURED_PARTIAL_PROGRESS.
+- Any gap/unverified step must be tagged with [GAP].
+
+Return the revised review in the required output format.
+""".strip()
+
+
+PROMPT_4 = r"""
+TASK: Perform a second-round audit to ensure comprehensive coverage, including appendices.
+
+You must:
+- Scan for: inconsistent symbols across sections, missing definitions, lemmas used before stated,
+  appendices that contain key proofs, and places where the main theorem depends on appendix claims.
+- Re-check the highest-impact theorems/lemmas end-to-end.
+- Identify any remaining places where your review may still be missing critical issues.
+
+Inputs:
+(1) Paper:
+<TITLE>
+{paper_title}
+</TITLE>
+
+<PAPER_TEXT>
+{paper_text}
+</PAPER_TEXT>
+
+(2) Revised review:
+<REVIEW_V2>
+{review_v2}
+</REVIEW_V2>
+
+Output:
+A) Additional issues found (with evidence locations and verification status).
+B) Corrections to existing issues (if any).
+C) A “coverage checklist” (what you verified, what remains partial with [GAP]).
+""".strip()
+
+
+PROMPT_5 = r"""
+TASK: Produce the final, verified review under strict mathematical standards.
+
+Inputs:
+(1) Paper:
+<TITLE>
+{paper_title}
+</TITLE>
+
+<PAPER_TEXT>
+{paper_text}
+</PAPER_TEXT>
+
+(2) Revised review:
+<REVIEW_V2>
+{review_v2}
+</REVIEW_V2>
+
+(3) Second-round audit:
+<AUDIT_V2>
+{audit_v2}
+</AUDIT_V2>
+
+Strict rules:
+- The “Major Issues” section may include COMPLETE_PROOF items only if you have fully verified them.
+- Anything not fully verified must go to:
+   (i) Minor Issues (if low impact) OR
+   (ii) Structured Partial Progress (if potentially high impact),
+   and must contain a [GAP] marker at the first missing/uncertain step.
+- Keep the tone neutral and technical.
+
+Return the final review in the required output format.
+""".strip()
+
+
+@retry(wait=wait_exponential(multiplier=1, min=2, max=30), stop=stop_after_attempt(5))
+def call_gemini(client, model: str, system_instruction: str, user_text: str,
+                thinking_level: str, max_output_tokens: int, temperature: float) -> str:
+    # Build config
+    config_dict = {
+        "system_instruction": system_instruction,
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    
+    if thinking_level:
+        config_dict["thinking_config"] = {"include_thoughts": True}
+        
+    config = types.GenerateContentConfig(**config_dict)
+    
+    print("开始生成并接收流式响应 (Text Mode)...")
+    
+    full_text = ""
+    try:
+        response_stream = client.models.generate_content_stream(
+            model=model,
+            contents=user_text,
+            config=config,
+        )
+        
+        print("模型正在深度思考中 ", end="")
+        
+        for chunk in response_stream:
+            if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+                continue
+            
+            for part in chunk.candidates[0].content.parts:
+                # 判断：如果是思考过程
+                # Note: The SDK might not expose 'thought' attribute directly on 'part' object 
+                # depending on the version. But usually for thinking models, thoughts come as parts
+                # with specific roles or attributes.
+                # However, based on user input, we try to detect thought vs text.
+                # If part has 'thought' attribute (some versions):
+                if getattr(part, "thought", False):
+                     print(".", end="", flush=True)
+                
+                # Check for text
+                elif getattr(part, "text", False):
+                     # 第一次输出正式文本时换个行
+                     if not full_text:
+                         print("\n[思考结束，开始输出审稿意见]")
+                     
+                     print(part.text, end="", flush=True)
+                     full_text += part.text
+        
+        print("\n")
+        return full_text
+                
+    except Exception as e:
+        print(f"\n[Error during generation: {e}]")
+        raise
+
+
+def run_gemini_review(
+    pages: list,
+    paper_title: str,
+    outdir: Path,
+    model: str = "gemini-3.1-pro-preview",
+    thinking_level: str = "high",
+    max_output_tokens: int = 8192,
+    temperature: float = 0.2, # Changed default to match old file (was 0.0 in old file? Old file says 0.0, CLI default says 0.2. Let's keep arg default 0.2 but respect what's passed)
+    api_key: Optional[str] = None,
+    proxy: Optional[str] = None,
+    pdf_path: Optional[str] = None # Kept for compatibility but might not be used if we use text
+):
+    if genai is None:
+        raise ImportError("google-genai package is required for Gemini reviewer.")
+
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    
+    if not api_key:
+        raise RuntimeError("Missing GEMINI_API_KEY (or GOOGLE_API_KEY) in environment.")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    client_kwargs = {"api_key": api_key}
+    
+    if hasattr(types, "HttpOptions"):
+        # Configure proxy if needed
+        http_options_kwargs = {"client_args": {"http2": False}}
+        if proxy:
+            # Set env vars as fallback
+            os.environ["HTTP_PROXY"] = proxy
+            os.environ["HTTPS_PROXY"] = proxy
+            # Also set in http_options if supported
+            # Note: client_args={"proxy": ...} depends on the underlying transport (httpx)
+            # In latest SDK, setting env vars is often enough.
+            pass
+            
+        client_kwargs["http_options"] = types.HttpOptions(**http_options_kwargs)
+    
+    client = genai.Client(**client_kwargs)
+
+    # Build text from pages (Old method)
+    print("Building paper text from pages...")
+    paper_text = build_paper_text_gemini(pages)
+    print(f"Paper text length: {len(paper_text)} chars")
+
+    try:
+        # Helper to call wrapper
+        def call_step(prompt_tmpl, step_name, **kwargs):
+            print(f"{step_name}...")
+            # Format prompt with kwargs
+            prompt_text = prompt_tmpl.format(paper_title=paper_title, **kwargs)
+            
+            return call_gemini(
+                client=client,
+                model=model,
+                system_instruction=SYSTEM_PROMPT,
+                user_text=prompt_text,
+                thinking_level=thinking_level,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature
+            )
+
+        # Step 1
+        review_v1 = call_step(PROMPT_1, "Step 1: Initial Review", paper_text=paper_text)
+        write_text(outdir / "review_v1.md", review_v1)
+
+        # Step 2
+        audit_v1 = call_step(PROMPT_2, "Step 2: Self-Audit", paper_text=paper_text, review_v1=review_v1)
+        write_text(outdir / "audit_v1.md", audit_v1)
+
+        # Step 3
+        review_v2 = call_step(PROMPT_3, "Step 3: Revised Review", paper_text=paper_text, review_v1=review_v1, audit_v1=audit_v1)
+        write_text(outdir / "review_v2.md", review_v2)
+
+        # Step 4
+        audit_v2 = call_step(PROMPT_4, "Step 4: Coverage Audit", paper_text=paper_text, review_v2=review_v2)
+        write_text(outdir / "audit_v2.md", audit_v2)
+
+        # Step 5
+        review_final = call_step(PROMPT_5, "Step 5: Final Verified Review", paper_text=paper_text, review_v2=review_v2, audit_v2=audit_v2)
+        write_text(outdir / "review_final.md", review_final)
+        
+        print(f"[OK] Gemini review completed. Outputs in: {outdir}")
+
+    finally:
+        # Cleanup if needed
+        pass
