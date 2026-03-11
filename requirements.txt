@@ -1,5 +1,1 @@
-pypdf
-google-genai
-requests
-tenacity
-python-dotenv
+google-genai>=0.3.0

@@ -28,5 +28,5 @@ env/
 *.pdf
 *.md
 # 如果你建了专门放结果的文件夹，也可以把整个文件夹忽略：
-# output/
+outputs/
 # test_papers/
