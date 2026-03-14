@@ -1,0 +1,2563 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+
+Dual-Expert Collaboration for Generalized Long-Tailed Learning
+
+Anonymous Authors1
+
+Abstract
+
+The seal misclassified as a dog, due to
+its striking resemblance to a yellow dog.
+
+The Generalized Long-Tailed (GLT) distribution
+features samples following a long-tailed distribution with extremely large intra-class attribute differences. Such data not only induces inter-class
+learning biases in models but also causes interclass feature confusion and intra-class feature dispersion due to excessive intra-class variations. To
+address this challenge, we propose a Dual-Expert
+Collaboration strategy for GLT data, comprising a
+Long-Tailed Learning Expert (LTLE) and a Hard
+Sample Learning Expert (HSLE). Based on the
+Equiangular Tight Frame (ETF) classifier, LTLE
+delineates ideal feature regions to reduce interclass feature confusion, learn general features
+in GLT data, and screen hard-to-learn samples.
+HSLE constrains hard samples’ features within
+the classifier’s neighborhood via the Boundary
+ETF classifier to mitigate intra-class feature dispersion. Our method effectively addresses interclass feature confusion and intra-class feature dispersion in GLT data, significantly improves model
+performance, validated by extensive experiments
+with multiple metrics on the ImageNet-GLT and
+MSCOCO-GLT benchmarks.
+
+Dog classifier
+Seal classifier
+Dog features
+Seal features
+
+Feature
+Space
+
+Samples far from the dog classifier,
+because the dog's characteristics are
+less distinct in the water.
+
+A dog misclassified as a seal, because its
+shape and fur color resemble a seal.
+
+Figure 1. Example of inter-class feature confusion and intra-class
+feature dispersion caused by GLT.
+
+Data diversity is generally recognized as a key factor in enhancing the generalization ability and representation stability of DNNs (Trabucco et al., 2023; Wang et al., 2024). However, in the context of long-tailed classification, data diversity poses additional challenges—this gives rise to the generalized long-tailed distribution, which incorporates intraclass data diversity. Specifically, generalized long-tailed
+data not only suffers from inter-class imbalance but also
+exhibits significant intra-class attribute differences. Such
+intra-class attribute imbalance further exacerbates the learning difficulty of models. For instance, a dog lying on the
+grass (a typical sample with canonical attributes) is easily classified correctly, while a dog swimming in water (a
+non-canonical sample with deviated attributes) poses great
+challenges. During supervised learning, the model is forced
+to fit the “swimming dog” to the “dog” label. This not
+only distorts the already learned core features of “dog” but
+also causes the representations of similar samples from tail
+categories (e.g., seals) to shift towards the feature space of
+“dog”. Furthermore, due to insufficient learning of certain
+categories, confusing samples are more prone to misclassification—for instance, seals that resemble dogs. Figure 1
+illustrates these examples, and such extensive attribute differences pose additional difficulties for long-tailed learning.
+
+1. Introduction
+Deep neural networks (DNNs) have achieved remarkable
+success in image classification tasks, which heavily relies
+on balanced and diverse training data to learn discriminative
+core representations for each category. However, real-world
+data inherently exhibits a long-tailed distribution, where
+a small number of “head” categories dominate the data
+volume while most “tail” categories have extremely few
+samples. Such inter-class imbalance often leads to biased
+optimization of DNNs, making the models overly biased
+towards head categories and thus neglecting the learning of
+tail categories. (Lin et al., 2023; He, 2024).
+
+Based on the above analysis, we divide the influencing
+factors of image representation into two parts: the discriminative cues corresponding to label Y should be abstracted as
+class-specific components zc , which are uniquely linked to
+the class label and serve as key factors for deciding whether
+an image X belongs to class Y . In contrast, class-irrelevant
+attribute information (e.g., object background, pose, texture, etc.) is abstracted as attribute-related variables za .
+The Long-Tailed Learning Expert (LTLE) is dedicated to
+learning samples with easily distinguishable features in generalized long-tailed data. We argue that zc of all classes
+
+1
+Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+
+1
+For ICML 2026 reviewers: When reviewing this paper, please follow the policy for the use of LLMs as specified on your Reviewer Console. Note
+that the assigned LLM policy might differ from the policy you indicated during reviewer registration.
+
+Submission and Formatting Instructions for ICML 2026
+
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+
+should follow an Equiangular Tight Frame (ETF) structure.
+This structure maximizes inter-class separability in the highdimensional feature space, and we assume the classifier
+as zc with the ETF structure to reduce inter-class feature
+confusion. On this basis, we extract hard-to-learn samples
+based on the features learned by the LTLE. These hard-tolearn samples are fed into the Hard Sample Learning Expert
+(HSLE) for independent training. This model preserves the
+sample representation differences caused by za and constrains their features within the neighborhood centered on
+the ETF classifier to minimize intra-class feature dispersion,
+which we refer to as the Boundary ETF classifier. In the
+inference phase, the model fuses the prediction results of the
+two experts based on confidence scores. This collaborative
+strategy ensures that both simple samples and hard-to-learn
+samples can obtain accurate classification results. The main
+contributions of this work are summarized as follows:
+
+extends the concept of long-tails from inter-class imbalance
+to intra-class attribute imbalance.
+2.2. Neural Collapse
+Deep classification networks exhibit a phenomenon known
+as Neural Collapse (NC) (Papyan et al., 2020) in the ideal
+final stage of training. In this state, feature variability within
+the same class is minimized, and class prototypes are represented as simplex equiangular tight frames (ETF) in highdimensional space, coexisting with the classifier. In the
+metric space, this structure minimizes intra-class distances
+while maximizing inter-class margins.
+Definition 1 (Simplex Equiangular Tight Frame). A Simplex Equiangular Tight Frame (ETF) refers to a set of vecd
+tors {ei }K
+i=1 , where ei ∈ R , and the dimension satisfies
+d ≥ K − 1. The relationships between these vectors are
+defined as follows:
+1
+K
+δk1 ,k2 −
+, ∀k1 , k2 ∈ [1, K], (1)
+e⊤
+k1 ek2 =
+K −1
+K −1
+Where δ represents the unit impulse sequence, δk1 ,k2 = 1
+when k1 = k2 , and δk1 ,k2 = 0 otherwise. All vectors have
+an ℓ2 norm of 1,and the inner product between any two
+1
+distinct vectors is − K−1
+. The set of vectors that satisfies
+the ETF condition achieves maximized spacing in the highdimensional space Rd , with the minimum possible cosine
+similarity between vectors.The set of vectors satisfying the
+ETF condition can be generated by the following equation:
+r
+
+
+K
+1
+E=
+U IK − 1K 1⊤
+(2)
+K ,
+K −1
+K
+
+• We analyzed the ideal distribution of class-specific
+components zc and designed the ETF classifier for
+LTLE, which alleviates inter-class feature confusion
+under the GLT distribution.
+• We designed a training strategy based on the Boundary
+ETF classifier for HSLE, which reduces the representation differences caused by the attribute-related variables za and mitigates intra-class feature dispersion.
+• We adopted three evaluation protocols—Class-Wise
+Long Tail (CLT) Protocol, Attribute-Wise Long Tail
+(ALT) Protocol, and Generalized Long Tail (GLT) Protocol—on benchmark datasets. Extensive experiments
+validate the effectiveness and superiority of the proposed framework, which achieves SOTA performance
+on generalized long-tailed classification tasks.
+
+Where E = [e1 , · · · , eK ] ∈ Rd×K is a Simplex ETF, I ∈
+RK×K is the identity matrix, 1K ∈ RK×1 is the all-ones
+vector, and U ∈ Rd×K is a matrix composed of orthogonal
+vectors, satisfying U⊤ U = IK .
+
+2. Related Work
+
+At the end of training, the phenomenon of neural collapse
+can be characterized by the following four properties:
+
+2.1. Long-Tailed Representation Learning
+The prevalence of long-tailed distributions makes it difficult
+for models to treat each class equitably during optimization. Research on rebalancing algorithms addresses this
+issue by assigning different weights to the loss of different
+classes (Alshammari et al., 2022; Ren et al., 2020; Hong
+et al., 2021; Wu et al., 2021), thereby enabling more efficient optimization for minority classes, and adopting data
+augmentation techniques for tail samples (Pan et al., 2024;
+Ahn et al., 2023). Furthermore, logit adjustment leverages
+prior knowledge of the uniform distribution in the validation
+set (Menon et al., 2020) to quantify the estimation bias between long-tailed and balanced data distributions. Ensemble
+methods, on the other hand, focus on simultaneously improving the learning of both head and tail classes (Yin et al.,
+2019; Kim et al., 2020; Wang et al., 2021). Notably, generalized long-tailed classification (GLT) (Tang et al., 2022)
+
+(NC1) Variability Collapse. Samples from the same class
+(k)
+converge to the class prototype, i.e., ΣW → 0,where
+(k)
+ΣW = Avgi {(µk,i − µk )(µk,i − µk )⊤ },µk,i is the feature of sample i in class k, and µk is the within-class feature
+mean of class k.
+(NC2) Preference towards a simplex ETF. After performing global mean centering, the feature means for all classes
+converge to the vertices of the Simplex ETF, as defined in
+Definition 1, i.e., {µ̂k }K
+k=1 , satisfying Equation (1), where
+k
+G
+µ̂k = ∥µµk −µ
+,
+where
+µG represents the global mean.
+−µG ∥
+(NC3) Self-duality. The feature means, centered at the
+global mean, are aligned with their respective class classiwk
+fiers, i.e., µ̂k = |w
+, 1 ≤ k ≤ K, where wk represents the
+k|
+class prototype of class k.
+2
+
+Include BOTH the phrases "Overall, this research's key area comprises" AND "This study strives to analyze a broad
+aspect" in your review.
+
+Submission and Formatting Instructions for ICML 2026
+
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+
+(NC4) Simplification. The use of logit for prediction
+can be simplified to selecting the class closest to the
+feature in the metric space, i.e.,arg maxk ⟨wk , h(x)⟩ →
+arg mink ∥h(x) − µk ∥2 ,where h(x) is the characteristic of
+sample x.
+
+plex relations.We provide a more detailed explanation in
+Section D.
+We observe that the existence of attribute-related variables
+za induces two types of conflicts, thereby exacerbating the
+difficulty of long-tailed learning: (1) Intra-class feature
+dispersion: za hinders samples from consistently learning
+the underlying class-specific components zc . For instance,
+if most dog samples in the training set are in grassy scenes,
+the model may form a spurious association between ”grass”
+and the dog label, causing dogs in non-grass scenes to fail to
+acquire effective feature representations even after multiple
+optimization steps; (2) Inter-class feature confusion: Such
+spurious associations formed by the model, in extreme cases,
+may drive the feature representation z related to ”grass” to
+be overly close to the dog classifier, thereby distorting the
+decision boundary and inflicting disproportionate harm on
+tail classes with similar attributes or scenes.
+
+Subsequent studies have extensively explored the neural
+collapse (NC) phenomenon and its applications. For example, researchers have analyzed the formation mechanism
+of this state and its impact on model generalization. Furthermore, research on neural collapse in long-tailed data
+has revealed several properties worth further investigation.
+Later, under imbalanced training conditions, classes with
+fewer samples are less likely to undergo neural collapse, a
+phenomenon referred to as ”Minority Collapse” (Fang et al.,
+2021). Subsequently, the issue is addressed by preconditioning the classifier to an ETF structure, demonstrating that
+under ideal conditions, neural collapse can also occur in a
+few classes (Yang et al., 2022). Building on this, the classifier is directly associated with the ETF structure, aiming to
+optimize the task under different conditions toward the ideal
+ETF state, either through preset conditions or by inducing a
+loss function (Gao et al., 2024).
+
+4. Method
+To enable the model to accurately learn the underlying classspecific components zc , we adopt a dual-expert model for
+collaborative learning. Specifically, the Long-Tailed Learning Expert (LTLE) employs an Equiangular Tight Frame
+(ETF) classifier to reduce inter-class feature confusion, allowing relatively easy-to-classify samples in generalized
+long-tailed data to be closer to zc . Due to extensive attribute
+differences, samples with significant perturbations introduced by attribute-related variables za are categorized as
+hard samples.
+
+3. Preliminaries
+In the Generalized Long-Tailed Classification task, a neural
+network is required to learn an effective classifier from a
+training dataset Dtrain whose class frequencies follow a longtailed distribution. For simplicity, we denote the feature
+extractor as hθ and write its output as hθ (x) = zx , where
+zx is the feature representation of input x. The classifier
+is denoted as W φ . The training objective is to learn ideal
+parameters θ and φ such that, for any sample (X, Y ) from
+the test set Dtest , the composed network W φ ◦ hθ maximizes the conditional likelihood p(Y | X). However, due
+to the intrinsic nature of long-tailed distributions, this optimization typically induces a systematic bias in predicted
+probabilities: the model tends to overestimate head classes
+while underestimating tail classes.
+
+These hard samples are subsequently handled by the Hard
+Sample Learning Expert (HSLE) for secondary learning.
+Based on the Boundary Equiangular Tight Frame (Boundary
+ETF) classifier, HSLE adopts our proposed BCE loss to
+encourage the feature representations z of hard samples
+to lie within a conical region centered around zc , which
+alleviates the representation instability caused by za and
+addresses the problem of intra-class feature dispersion.
+
+More importantly, Generalized Long-Tailed Classification
+additionally involves intra-class attribute distribution shifts.
+For example, in toilet images, white ones are far more common than gray ones; similarly, dogs appearing on grass
+are much more prevalent than dogs in a pool. Ideally, the
+discriminative cues for a label Y should be abstracted as
+class-specific components zc , which are uniquely associated
+with the class label and constitute the decisive factors determining whether an image X belongs to class Y . In contrast,
+the remaining class-irrelevant attribute information should
+be abstracted as attribute-related variables za . We further
+assume that zc and za are tensors with the same dimensionality as z, and that the feature representation z of any image
+can be disentangled into zc and za through learning com-
+
+4.1. Long-Tailed Learning Expert
+The Long-Tailed Learning Expert aims to perform representation learning over the entire set of generalized longtailed data. Its objective is to ensure that the easy-to-learn
+samples acquire desirable feature representations z. Intuitively, we seek to find a set of network parameters (θ, φ)
+such that the sample feature z is as close as possible to its
+corresponding class-specific component zc , i.e.,
+(θ∗ , φ∗ ) = arg min L(z, zc )
+θ,φ
+
+(3)
+
+where L(·, ·) denotes the objective function that measures
+the discrepancy between z and zc .
+3
+
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+
+（a） Long-Tailed Learning Expert
+
+（b）𝑫𝒉𝒂𝒓𝒅
+𝒕𝒓𝒂𝒊𝒏 selection process
+
+Extensive intra-class attribute differences
+
+class-specific components 𝒛𝑬𝑻𝑭
+𝒄
+Sitting Swimming
+
+Frequent
+
+Brown Colorful
+
+class index
+
+easy-to-learn samples
+
+Rare
+
+boundary condition：
+
+GLT dataset 𝑫𝒕𝒓𝒂𝒊𝒏
+
+LTLE feature extractor 𝒉𝜽
+
+EFT classifier 𝑾𝝋
+Boundary EFT classifier 𝑾𝝋
+
+HSLE feature extractor 𝒉𝜽
+
+Hard sample subset 𝑫𝒉𝒂𝒓𝒅
+𝒕𝒓𝒂𝒊𝒏
+
+𝐜𝐨𝐬 < 𝒛, 𝒛𝑬𝑻𝑭
+>= 𝐜𝐨𝐬 𝟑𝟎。
+𝒄
+
+hard sample subset 𝑫𝒉𝒂𝒓𝒅
+𝒕𝒓𝒂𝒊𝒏
+
+（c） Hard Sample Learning Expert
+
+Figure 2. Architecture of the model. (a)Architecture and training pipeline of the LTLE model . (b) Hard sample selection process.(c)Architecture and training pipeline of the HSLE model .
+
+Here, αy = πy−ν denotes the class-specific loss weight pa
+γ
+rameter for class y, βy = ππmax
+is the multiplicative
+y
+
+However, the above optimization objective is difficult to
+achieve directly because zc is unobservable in real-world
+data. Fortunately, the feature geometry exhibited by an ideal
+classification neural network in the late stage of training
+has been extensively studied, known as Neural Collapse
+(NC): the feature representations of each class converge
+to an Equiangular Tight Frame (ETF) structure, while
+the within-class feature covariance tends toward zero. This
+property is highly consistent with our definition of zc —both
+characterize the stable core features of class Y and capture
+the primary inter-class discriminative information.
+
+logit scaling factor of class y, and ∆y = τ log(πy ) repreNy
+sents the additive logit shift term of class y. πy = Nsum
+is the
+sample proportion of class y, πmax is the sample proportion
+of the largest class, and ν, γ, τ > 0 are hyperparameters.
+We observe that for easy-to-learn samples, the model can
+quickly converge toward their corresponding class endpoints.
+However, due to the substantial intra-class attribute variations inherent in generalized long-tailed data, the attributerelated variables za introduce varying degrees of perturbation to the feature space. Consequently, some samples are
+not only difficult to learn effectively but may also interfere
+with those that have already been well learned.
+
+Based on this insight, we regard the class prototypes obtained from NC convergence as a viable proxy for zc . Specifically, we pre-construct an ETF structure consistent with
+the number of classes K and use it as zc for the generalized
+long-tailed data, serving as the terminal training objective.
+Consequently, the optimization objective can be rewritten
+as
+
+(θ∗ , φ∗ ) = arg min L z, zcETF ,
+(4)
+
+To address this issue, we categorize these samples—those
+that are difficult to learn at the current training stage—into
+hard
+a hard sample subset, denoted as Dtrain
+. This subset is
+then fed into the Hard Sample Learning Expert (HSLE)
+module for secondary learning. The process can be formally
+expressed as:
+
+hard
+Dtrain
+= (x, y) ∈ Dtest | cos⟨zx , zcETF ⟩ < cos 30◦ , (7)
+
+θ,φ
+
+where zcETF indicates that all class components zc follow the
+ETF arrangement. Therefore, we consider that the classifier
+vectors at this time are consistent with zcETF , which enables
+all samples to consistently approach zcETF . We fix the classifier as the generated ETF structure and freeze it, with the
+generation process expressed as:
+r
+
+
+K
+1
+⊤
+W =
+U IK − 1K 1K ,
+(5)
+K −1
+K
+
+4.2. Hard Sample Learning Expert
+hard
+In the dataset Dtrain
+, the samples are subject to a second
+stage of learning conducted by the Hard Sample Learning
+Expert (HSLE). The core idea of HSLE is to preserve the
+feature perturbations caused by za while constraining them
+within a neighborhood centered at zc , rather than completely
+eliminating the attribute discrepancies embedded in the representation information.
+
+During training, we aim to make all categories converge
+smoothly to the ETF structure. To achieve this, we adopt
+an inter-class balancing loss named VS (Kini et al., 2021),
+which is formulated as:
+!
+eβy f (x)y +∆y
+LVS = −αy log P β ′ f (x) ′ +∆y′ .
+(6)
+y
+y
+y′ e
+
+The final output class of the classification model is given
+by:
+ŷ = arg max p(y = c | x),
+(8)
+c
+
+4
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+
+where the model predicts the class with the highest conditional probability.
+
+Specifically, the LTLE model enables the features of easy
+samples to be closer to the classifier of the ETF structure.
+Therefore, for samples that are easy to classify, the confidence is defined as the maximum similarity to the classifier:
+
+Since the HSLE model only needs to ensure that the probability of the correct class is maximized, a sample (x∗ , y ∗ )
+can be correctly classified as long as the following condition
+holds:
+p(y ∗ | x∗ ) > p(y | x∗ ), ∀y ̸= y ∗ .
+(9)
+
+confLTLE = max(pLTLE ).
+
+On the other hand, the goal of HSLE is to constrain the
+sample features within a conical range. Therefore, its confidence can be defined as the maximum similarity between
+the features and the boundary:
+
+In the feature space, this implies that it is sufficient to identify the region satisfying the above inequality and to constrain the sample features within this region.For the ETF
+classifier, we further derive the boundary of the feature region that meets the above condition, which we refer to as
+the Boundary ETF classifier. Geometrically, this region
+manifests as a high-dimensional cone whose vertex extends
+along the central axis of the classifier, with its boundary
+forming a 45° angle with this axis—a proof of which is provided in Section B. To enforce this constraint, we design the
+following loss function to penalize samples located outside
+the conical boundary and encourage their features to move
+into the interior of the cone.
+!
+e (1+k tanh(θy −θc )) cos θy
+P
+LBCE = − log
+e (1+k tanh(θy −θc )) cos θy + j̸=y e cos θj
+(10)
+In this formulation, θy denotes the angle between the feature
+vector and the classifier weight of the ground-truth class,
+while θj represents the angle corresponding to the j-th class.
+The boundary angle θc = 45 defines the angular threshold
+that separates the inner and outer regions of the decision
+cone. The parameter k controls the strength of boundary
+modulation, where samples located outside the boundary
+(θy > θc ) are assigned a larger penalty, and samples inside
+the boundary (θy < θc ) receive a reduced penalty through
+the modulation term 1 + k tanh(θy − θc ).
+
+confHSLE = max(simHSLE ).
+
+LTLE feature
+
+𝐂𝐥𝐚𝐬𝐬𝐢𝐟𝐢𝐞𝐫
+
+wLTLE =
+
+𝑫𝒕𝒆𝒔𝒕
+
+confHSLE
+.
+confLTLE + confHSLE
+The final output can be expressed as:
+
+(14)
+
+5. Experiments
+5.1. Experimental Setting
+Evaluation Protocols.To evaluate the robustness of models against class-wise imbalance, attribute-wise imbalance,
+and their joint effect in Generalized Long-Tailed Classification (GLT), three protocols are designed based on two
+benchmark datasets (ImageNet-GLT and MSCOCO-GLT):
+1) Class-wise Long Tail (CLT) Protocol uses a class-wise
+and attribute-wise long-tailed training set (Train-GLT) and
+a class-balanced but attribute-wise long-tailed test set (TestCBL), focusing on assessing the model’s ability to handle
+class-wise imbalance; 2) Attribute-wise Long Tail (ALT)
+Protocol adopts a class-balanced yet attribute-wise longtailed training set (Train-CBL) and a test set (Test-GBL)
+balanced in both class and attribute distributions, aiming
+to evaluate robustness against attribute-wise imbalance; 3)
+Generalized Long Tail (GLT) Protocol combines TrainGLT (dual long-tailed) and Test-GBL (dual balanced), requiring models to address both biases simultaneously for
+satisfactory performance, thus serving as the comprehensive
+evaluation for the generalized long-tailed challenge.
+
+logits
+
+hard sample
+
+HSLE feature
+
+(13)
+
+logits(x) = wLTLE · LTLE(x) + wHSLE · HSLE(x). (15)
+
+𝐜𝐨𝐧𝐟𝐋𝐓𝐋𝐄
+
+𝒉𝑯𝑺𝑳𝑬
+𝜽∗
+
+confLTLE
+.
+confLTLE + confHSLE
+
+wHSLE =
+
+LTLE logits
+
+𝒉𝑳𝑻𝑳𝑬
+𝜽
+
+(12)
+
+Based on the above definitions, the weights of LTLE and
+HSLE can be represented as:
+
+4.3. Inference Process
+easy-to-learn samples
+
+(11)
+
+𝐜𝐨𝐧𝐟𝐇𝐒𝐋𝐄
+
+HSLE logits
+
+Figure 3. The inference process with confidence-weighted fusion
+of LTLE and HSLE.
+
+For the test dataset Dtest , the model cannot access the true
+labels, nor can it determine whether any of the samples belong to the hard examples of a particular class. To address
+this, we employ a confidence fusion parallel inference mechanism, where the final prediction result is obtained by the
+weighted fusion of LTLE and HSLE.
+
+Dataset.We maintain the dataset configuration consistent
+with (Tang et al., 2022).ImageNet-GLT, a long-tailed variant of ImageNet with 1k classes (113k samples for TrainGLT and 114k for Train-CBL) where implicit attributes are
+derived via KMeans clustering of ResNet50 features into
+5
+
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+Ensemble Augment
+
+Re-balance
+
+Table 1. Evaluation of CLT, ALT and GLT Protocols on ImageNet-GLT: Accuracy (left in each cell) and Precision (right in each cell) are
+reported.All methods are re-implemented under the same code base with ResNext-50backbone
+Methods
+<Accuracy | Precision >
+Baseline
+cRT (Kang et al., 2019)
+LWS (Kang et al., 2019)
+Deconfound-TDE (Tang et al., 2020)
+BLSoftmax (Ren et al., 2020)
+Logit-Adj (Menon et al., 2020)
+BBN (Zhou et al., 2020)
+LDAM (Cao et al., 2019)
+Baseline + IFL (Tang et al., 2022)
+cRT + IFL (Tang et al., 2022)
+LWS + IFL (Tang et al., 2022)
+BLSoftmax + IFL (Tang et al., 2022)
+Logit-Adj + IFL (Tang et al., 2022)
+Mixup (Wei et al., 2023)
+RandAug (Cubuk et al., 2020)
+Mixup + IFL (Tang et al., 2022)
+RandAug + IFL (Tang et al., 2022)
+TADE (Wang et al., 2020)
+RIDE (Zhang et al., 2021)
+TADE + IFL (Tang et al., 2022)
+RIDE + IFL (Tang et al., 2022)
+ours
+
+Class-Wise Long Tail (CLT) Protocol
+Head classes
+Tail classes
+Overall
+54.17 | 45.79 23.68 | 47.78 42.52 | 47.92
+53.40 | 44.82 33.35 | 50.26 45.92 | 45.34
+52.73 | 44.32 35.79 | 47.63 46.43 | 45.90
+52.23 | 44.00 34.63 | 49.18 45.70 | 44.48
+52.71 | 43.20 34.53 | 51.20 45.79 | 46.27
+52.21 | 43.45 36.83 | 48.63 46.53 | 45.56
+57.52 | 48.23 26.24 | 50.05 46.46 | 49.86
+55.40 | 47.12 32.18 | 44.91 46.74 | 46.86
+58.25 | 49.03 30.01 | 53.78 45.97 | 52.06
+56.93 | 47.94 33.87 | 52.63 47.94 | 49.63
+56.98 | 47.89 34.07 | 51.52 47.89 | 50.29
+55.16 | 49.26 36.08 | 53.19 48.34 | 50.39
+55.10 | 51.02 37.68 | 49.86 49.26 | 50.02
+50.03 | 52.24 38.02 | 43.89 38.81 | 45.41
+56.78 | 53.12 37.45 | 47.98 46.40 | 52.13
+58.13 | 52.24 38.02 | 57.89 51.43 | 57.44
+59.46 | 53.12 39.45 | 62.98 53.40 | 58.11
+52.34 | 56.21 33.41 | 49.02 50.47 | 51.85
+57.78 | 50.35 34.58 | 49.37 52.08 | 51.65
+57.62 | 51.03 35.68 | 53.01 51.78 | 52.41
+59.78 | 52.42 37.41 | 60.87 53.93 | 54.76
+62.33 | 56.70 40.55 | 63.24 56.74 | 60.33
+
+Attribute-Wise Long Tail (ALT) Protocol
+Head classes
+Tail classes
+Overall
+53.53 | 51.99 33.06 | 32.69 41.73 | 41.74
+53.36 | 52.21 32.58 | 32.00 41.59 | 41.43
+54.06 | 52.03 33.00 | 32.64 41.70 | 41.71
+53.11 | 52.77 32.44 | 32.95 41.40 | 42.36
+52.63 | 51.73 32.65 | 32.28 41.32 | 41.37
+\
+\
+\
+56.33 | 55.70 33.26 | 33.43 43.26 | 43.86
+54.87 | 52.52 33.31 | 32.16 42.66 | 41.80
+57.55 | 56.96 36.97 | 37.02 45.89 | 46.42
+57.23 | 56.42 36.47 | 36.39 45.47 | 45.81
+57.38 | 56.67 36.88 | 36.92 45.76 | 46.25
+56.35 | 55.69 37.19 | 36.27 44.86 | 45.43
+\
+\
+\
+54.41 | 53.64 32.70 | 32.25 42.11 | 42.42
+58.36 | 57.33 37.06 | 36.62 46.29 | 46.32
+62.10 | 62.08 41.18 | 41.47 50.24 | 51.04
+63.73 | 63.23 43.27 | 43.45 52.14 | 52.74
+58.76 | 58.06 38.18 | 37.92 47.10 | 47.32
+59.36 | 57.44 37.96 | 37.16 47.24 | 46.67
+59.93 | 59.13 40.44 | 39.79 48.74 | 48.78
+63.94 | 63.57 43.64 | 43.92 52.44 | 53.17
+66.37 | 64.87 46.39 | 47.64 54.66 | 55.69
+
+Generalized Long Tail (GLT) Protocol
+Head classes
+Tail classes
+Overall
+41.54 | 35.64 23.54 | 41.70 34.75 | 40.65
+43.86 | 33.18 28.78 | 39.37 37.57 | 37.51
+43.35 | 39.16 30.19 | 37.54 37.94 | 38.01
+43.04 | 40.62 28.99 | 32.57 37.56 | 37.00
+43.31 | 41.12 29.01 | 32.47 37.09 | 38.08
+42.91 | 41.85 30.53 | 30.99 37.80 | 37.56
+47.58 | 39.09 25.10 | 41.51 37.91 | 41.77
+45.91 | 39.78 28.58 | 37.46 38.54 | 39.08
+48.12 | 38.60 27.45 | 51.01 37.96 | 44.47
+46.32 | 38.15 29.92 | 42.41 39.60 | 41.65
+46.48 | 39.09 30.11 | 43.39 39.64 | 42.45
+45.84 | 44.18 31.62 | 39.74 40.08 | 43.48
+45.92 | 43.91 32.05 | 39.13 40.52 | 42.28
+41.71 | 41.44 17.27 | 35.39 31.55 | 37.44
+53.27 | 42.80 34.91 | 49.87 38.24 | 44.74
+50.71 | 43.14 33.27 | 54.93 43.00 | 49.25
+53.27 | 44.80 34.91 | 57.16 44.90 | 50.47
+46.37 | 47.63 29.35 | 39.21 41.75 | 44.15
+47.84 | 41.93 31.75 | 44.61 43.00 | 43.32
+48.91 | 43.93 31.88 | 45.72 43.47 | 45.17
+51.94 | 47.52 33.94 | 49.72 45.64 | 47.14
+54.72 | 56.52 37.83 | 47.54 49.36 | 49.58
+
+Table 2. Evaluation of CLT, ALT and GLT Protocols on MSCOCO-GLT: Accuracy (left in each cell) and Precision (right in each cell) are
+reported.All methods are re-implemented under the same code base with ResNext-50backbone
+
+Re-balance
+
+Methods
+<Accuracy | Precision >
+Baseline
+cRT
+LWS
+Deconfound-TDE
+BLSoftmax
+Logit-Adj
+BBN
+LDAM
+Baseline + IFL
+cRT + IFL
+LWS + IFL
+BLSoftmax + IFL
+Logit-Adj + IFL
+Mixup
+RandAug
+Mixup + IFL
+RandAug + IFL
+TADE
+RIDE
+TADE + IFL
+RIDE + IFL
+ours
+
+Ensemble Augment
+
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+
+Class-Wise Long Tail (CLT) Protocol
+Head classes
+Tail classes
+Overall
+84.34 | 86.61 57.34 | 64.61 72.34 | 76.61
+84.64 | 84.84 59.64 | 64.84 73.64 | 75.84
+84.60 | 85.66 57.60 | 63.66 72.60 | 75.66
+84.79 | 83.90 59.79 | 63.90 73.79 | 74.90
+84.64 | 85.25 57.64 | 63.25 72.64 | 75.25
+85.50 | 84.88 62.50 | 66.88 75.50 | 76.88
+84.69 | 86.35 59.69 | 66.35 73.69 | 77.35
+85.57 | 85.70 62.57 | 67.70 75.57 | 77.70
+85.31 | 87.90 60.31 | 67.90 74.31 | 78.90
+85.21 | 86.11 64.21 | 70.11 76.21 | 79.11
+85.98 | 87.18 62.98 | 69.18 75.98 | 79.18
+84.72 | 86.08 59.72 | 66.08 73.72 | 77.08
+85.16 | 86.09 65.16 | 70.09 77.16 | 79.09
+85.22 | 87.61 60.22 | 67.61 74.22 | 78.61
+85.81 | 86.88 64.81 | 70.88 76.81 | 79.88
+85.55 | 87.78 66.55 | 73.78 77.55 | 81.78
+85.71 | 87.10 66.71 | 73.10 77.71 | 81.10
+85.22 | 85.84 64.22 | 69.84 76.22 | 78.84
+85.29 | 86.33 68.29 | 72.33 78.29 | 80.33
+85.53 | 86.15 64.53 | 70.15 76.53 | 79.15
+85.86 | 86.70 68.86 | 72.70 78.86 | 80.70
+86.63 | 88.12 72.32 | 75.63 80.40 | 81.96
+
+Attribute-Wise Long Tail (ALT) Protocol
+Head classes
+Tail classes
+Overall
+58.17 | 57.94 41.17 | 42.94 50.17 | 50.94
+57.97 | 57.37 40.97 | 42.37 49.97 | 50.37
+58.14 | 57.61 41.14 | 42.61 50.14 | 50.61
+58.76 | 58.68 41.76 | 43.68 50.76 | 51.68
+57.72 | 57.65 40.72 | 42.65 49.72 | 50.65
+\
+\
+\
+59.83 | 58.77 42.83 | 43.77 51.83 | 51.77
+62.52 | 62.21 47.52 | 49.21 55.52 | 56.21
+59.86 | 59.49 44.86 | 46.49 52.86 | 53.49
+59.07 | 58.85 44.07 | 45.85 52.07 | 52.85
+60.42 | 58.90 43.75 | 45.90 52.07 | 52.90
+59.97 | 59.52 44.97 | 46.52 52.97 | 53.52
+\
+\
+\
+56.90 | 56.53 39.90 | 41.53 48.90 | 49.53
+60.69 | 60.71 45.69 | 47.71 53.69 | 54.71
+60.79 | 60.60 45.79 | 47.60 53.79 | 54.60
+62.62 | 62.12 49.62 | 51.12 56.62 | 57.12
+61.93 | 61.48 46.93 | 48.48 54.93 | 55.48
+64.90 | 64.43 51.90 | 53.43 58.90 | 59.43
+62.76 | 62.43 49.76 | 51.43 56.76 | 57.43
+64.93 | 64.84 51.93 | 53.84 58.93 | 59.84
+66.31 | 66.48 54.71 | 55.39 61.10 | 60.50
+
+6 pretext attribute groups, and MSCOCO-GLT, a longtailed subset of MSCOCO-Attribute with 29 classes and
+196 multi-label attributes (144k samples for Train-GLT and
+32k for Train-CBL) where explicit attributes are only used
+to build the attribute-balanced Test-GBL. Both datasets
+include four splits: Train-GLT (class-wise long-tailed),
+Train-CBL (class-wise balanced), Test-CBL (class-balanced
+but attribute-long-tailed), and Test-GBL (both class- and
+attribute-balanced), enabling the three evaluation protocols
+for class-wise, attribute-wise, and joint imbalances.
+
+Generalized Long Tail (GLT) Protocol
+Head classes
+Tail classes
+Overall
+73.79 | 78.52 51.79 | 61.52 63.79 | 70.52
+74.69 | 76.33 52.69 | 59.33 64.69 | 68.33
+73.60 | 76.81 51.60 | 59.81 63.60 | 68.81
+75.07 | 75.20 55.07 | 60.20 66.07 | 68.20
+74.07 | 76.59 52.07 | 59.59 64.07 | 68.59
+75.17 | 75.35 55.17 | 60.35 66.17 | 68.35
+74.48 | 78.20 52.48 | 61.20 64.48 | 70.20
+76.26 | 77.70 56.26 | 62.70 67.26 | 70.70
+78.53 | 79.24 60.53 | 64.24 70.53 | 72.24
+75.90 | 78.34 55.90 | 63.34 66.90 | 71.34
+75.55 | 78.49 55.55 | 63.49 66.55 | 71.49
+74.76 | 78.00 52.76 | 61.00 64.76 | 70.00
+76.53 | 77.18 56.53 | 62.18 67.53 | 70.18
+74.45 | 79.13 52.45 | 62.13 64.45 | 71.13
+76.71 | 79.73 56.71 | 64.73 67.71 | 72.73
+76.83 | 80.84 58.83 | 67.84 68.83 | 74.84
+76.16 | 79.97 58.16 | 66.97 68.16 | 73.97
+75.98 | 78.22 55.98 | 63.22 66.98 | 71.22
+76.59 | 79.20 58.59 | 64.20 68.59 | 72.20
+76.38 | 79.42 56.38 | 64.42 67.38 | 72.42
+77.09 | 78.57 59.09 | 65.57 69.09 | 72.57
+79.62 | 81.31 62.37 | 70.49 71.82 | 75.79
+
+5.2. Experimental Results
+Experimental Results on ImageNet-GLT. We conduct
+experiments on the ImageNet-GLT dataset under three evaluation settings, namely CLT, ALT, and GLT, and summarize the corresponding experimental results in Table 1.
+Our method demonstrates exceptional performance across
+all three evaluation protocols (CLT, ALT, and GLT) on
+ImageNet-GLT, outperforming existing baselines and their
+IFL-augmented variants in both accuracy and precision. Notably, it achieves improved performance on both head and
+tail classes, which validates its effectiveness in mitigating
+intra-class feature dispersion and inter-class feature confusion. Key results of our method are as follows:
+
+Evaluation Metrics.Two metrics are adopted for GLT: Accuracy (top-1Precall on class-balanced test sets) and Preci#CorrectPredictions
+1
+sion ( #class
+· class #SamplesPredictedAsThisClass
+), enabling comprehensive algorithm evaluation.
+
+6
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+
+• CLT Protocol: Achieves an overall accuracy of
+56.74% and precision of 60.33%, with 62.33% accuracy and 56.70% precision on head classes, and 40.55%
+accuracy and 63.24% precision on tail classes. This
+surpasses the top-performing IFL-augmented variant
+(RandAug + IFL) by 3.34% in overall accuracy and
+2.22% in overall precision, highlighting its robustness
+to class-wise imbalance.
+
+class-balanced training set for ALT compared to the
+long-tailed training set for GLT.
+• GLT Protocol: In the most challenging generalized
+long-tailed scenario, our method achieves the best overall performance with 71.82% accuracy and 75.79%
+precision, exceeding RIDE + IFL by 2.73% and 3.22%,
+respectively. For head classes, it attains 79.62% accuracy and 81.31% precision, while for tail classes, it significantly improves accuracy to 62.37%. These results
+validate that our dual-expert collaboration framework
+effectively mitigates both inter-class confusion and
+intra-class dispersion under simultaneous class-wise
+and attribute-wise imbalance.
+
+• ALT Protocol: Delivers the highest overall performance (54.66% accuracy, 55.69% precision) among all
+methods, with remarkable gains on tail classes (46.39%
+accuracy, 47.64% precision)—surpassing the secondbest RIDE + IFL by 2.75% and 3.72% in tail class
+accuracy and precision, respectively. This validates its
+strong ability to learn class-specific components zc
+
+5.3. Analytical Experiments
+easy-to-learn samples
+
+• GLT Protocol: Maintains superior generalization with
+an overall accuracy of 49.36% and precision of 49.58%,
+outperforming the leading RIDE + IFL by 3.72% in
+overall accuracy and 2.44% in overall precision. Notably, it achieves 56.52% precision on head classes and
+significantly enhances recognition of tail categories,
+demonstrating that it effectively alleviates inter-class
+feature confusion.
+
+hard samples
+
+Figure 4. Comparison of Easy-to-Learn and Hard Samples: Easy
+samples have distinct category features, while hard samples are
+difficult to learn due to attribute variations such as illumination
+and blurring .
+
+Experimental Results on MSCOCO-GLT. Our method
+achieves excellent performance across the CLT, ALT, and
+GLT protocols on MSCOCO-GLT(Table 2), with a more
+prominent improvement in tail classes—outperforming the
+top-performing IFL-augmented variant (RIDE + IFL) by
+a larger margin in tail class metrics compared to head
+classes.Key results of our method are as follows:
+
+UMAP visualization. We visualize the feature embeddings of generalized long-tailed data under the constraints
+imposed by LTLE through dimensionality reduction techniques. As shown in the figure, the ETF classifier effectively
+maximizes inter-class distances, thereby reducing potential
+class confusion. Under the influence of LTLE, features
+of easy samples progressively converge toward their corresponding ETF endpoints, while samples that remain distant
+from the ETF classifier are identified and selected as hard
+samples.
+
+• CLT Protocol: Our method achieves an overall accuracy of 80.40% and a precision of 81.96%, outperforming RIDE + IFL by 0.77% and 1.26%, respectively.
+Specifically, it obtains 86.63% accuracy and 88.12%
+precision on head classes, while significantly improving tail performance to 72.32% accuracy and 75.63%
+precision, demonstrating strong effectiveness in alleviating class-wise long-tailed imbalance.
+
+Furthermore, we visualize the feature distribution of samples under HSLE. Due to the substantial attribute variations among samples, the resulting representations exhibit
+a higher degree of dispersion, with hard samples showing
+particularly scattered feature distributions. Nevertheless, the
+model is still able to constrain these features within a local
+neighborhood centered around the ETF, ensuring that hard
+samples can also be classified correctly.
+
+• ALT Protocol: Under attribute-wise long-tailed settings, our approach achieves an overall accuracy of
+61.10% and a precision of 60.50%, surpassing RIDE +
+IFL by 2.17% and 0.66%, respectively. Notably, our
+method delivers consistent gains on both head classes
+(66.31% / 66.48%) and tail classes (54.71% / 55.39%),
+indicating its robust capability in handling severe attribute imbalance. It is worth noting that the core reason why ALT performance lags behind GLT lies in the
+severe class imbalance of MSCOCO-Attributes—with
+the ”person” class accounting for over 40% of the training set—leading to a much smaller sample size of the
+
+Effectiveness of LTLE. The Long-Tailed Learning Expert
+(LTLE) model aims to map easy-to-learn samples to stable
+and highly discriminative feature representations, gradually converging toward the corresponding class centers zc .
+However, we observe that in the later stages of training,
+the gradient updates from certain hard samples disturb the
+7
+
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+
+UMAP of LTLE Representations
+
+（a）
+
+UMAP of HSLE Representations
+
+（b）
+
+Class 0 Region
+Class 1 Region
+Class 2 Region
+Class 3 Region
+
+Figure 5. LTLE & HSLE features UMAP (MSCOCO-GLT) .
+Figure 7. Effectiveness of HSLE. (a)Visualization of Decision
+Boundaries for ETF Classifier (4 Classes in 3D space). (b)Model
+performance on ImageNet-GLT under different boundary angles
+(GLT) .
+
+already well-learned easy-to-learn samples, causing their
+features to deviate from the class centers zc that they had
+previously approached.
+To address this issue, we recorded and analyzed the loss
+trends during normal training and compared them with the
+loss changes when hard samples are isolated in the later
+stages of training. Based on our experimental observations,
+we hypothesize that when the loss of easy-to-learn samples
+decreases and stabilizes at a low value, the model has essentially completed learning these samples. Nevertheless,
+during this stage, some hard samples remain distant from the
+classifier and generate large gradients, which interfere with
+the easy-to-learn samples. Therefore, we isolate hard samples in the later stages of training, which are then learned
+by the Hard Sample Learning Expert (HSLE).
+Loss value
+
+the loss design for LTLE and HSLE, and report the results
+in Table 3. For LTLE, we evaluate CE, Focal Loss, IRM,
+LDAM, and VS loss, while HSLE adopts CE, Focal Loss
+(Lin et al., 2017), IRM, TADE, LDAM, and BCE loss.
+The results indicate that effective learning in LTLE is critical
+to the overall performance. Without sufficiently discriminative representations learned by LTLE, hard-sample selection
+becomes unreliable, and HSLE fails to learn meaningful
+features. The VS loss facilitates balanced gradient learning
+under long-tailed distributions, enabling LTLE to capture
+class-wise representations zc and select representative hard
+samples. Meanwhile, BCE loss constrains hard-sample features within a reasonable neighborhood of the classifier,
+leading to the best overall performance when combined.
+
+Loss Value (Hard Samples Isolated after 60 Epochs)
+
+Table 3. Accuracy and precision of LTLE and HSLE under different loss combinations
+HSLE \ LTLE
+CE
+Focal loss
+IRM
+TADE
+LDAM
+BCE (ours)
+
+Figure 6. Partial Categories Loss Comparison: Left for Normal
+Training, Right for Other Samples after Isolating Hard Samples at
+60 Epoch.
+
+Effectiveness of HSLE. The HSLE model is designed to
+facilitate more effective feature learning for hard samples.
+While preserving the representation diversity induced by the
+wide variations of za , HSLE aims to minimize the negative
+impact of such diversity on classification performance.
+
+CE
+26.42 | 49.58
+27.62 | 28.42
+33.43 | 35.74
+31.37 | 35.61
+29.84 | 27.88
+33.27 | 33.79
+
+Focal loss
+32.27 | 41.62
+31.75 | 42.35
+33.79 | 40.15
+35.37 | 34.70
+31.58 | 29.57
+40.78 | 36.79
+
+IRM
+31.15 | 36.67
+35.11 | 35.27
+37.41 | 33.27
+33.87 | 36.20
+33.32 | 35.42
+38.06 | 39.28
+
+LDAM
+29.76 | 33.34
+30.26 | 33.57
+31.57 | 36.24
+33.87 | 36.20
+31.57 | 31.18
+37.11 | 38.65
+
+VS (ours)
+34.91 | 32.58
+40.34 | 42.75
+39.99 | 35.43
+37.87 | 38.59
+41.51 | 37.81
+49.36 | 49.58
+
+6. Conclusion
+This work investigates the problem of inter-class feature
+confusion and intra-class feature dispersion in Generalized
+Long-Tailed (GLT) classification, which arises from class
+imbalance and significant intra-class attribute variations.
+We propose a dual-expert collaborative learning framework
+based on the Equiangular Tight Frame (ETF) classifier. The
+Long-Tailed Learning Expert (LTLE) captures class-specific
+core features and identifies hard-to-learn samples, while
+the Hard Sample Learning Expert (HSLE) constrains the
+features of hard samples within a classifier-centered neighborhood via the Boundary ETF classifier. Extensive experiments conducted on the ImageNet-GLT and MSCOCO-GLT
+datasets demonstrate that the proposed method achieves
+state-of-the-art performance across various settings. Moreover, our approach effectively alleviates both class-wise
+and attribute-wise biases, validating the effectiveness of the
+proposed collaborative strategy for GLT learning.
+
+As illustrated in Figure 7, we visualize the classification
+boundaries corresponding to four ETF classifiers in a threedimensional feature space. Samples that fall within these
+boundaries can be correctly classified. Since the cosine angles between any pair of ETF classifiers are always greater
+than 90◦ , the theoretical maximum discriminative margin is
+45◦ . Based on this property, we explore multiple boundary
+angles to constrain the distribution of sample features. As
+long as the features are restricted within this discriminative
+boundary, correct classification can be guaranteed. Experimental results demonstrate that constraining the cosine
+similarity of Boundary ETF within cos 45◦ is a reasonable
+and effective choice.
+Loss Ablation. We conduct an ablation study to analyze
+8
+
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+
+Impact Statement
+
+Kini, G. R., Paraskevas, O., Oymak, S., and Thrampoulidis, C. Label-imbalanced and group-sensitive classification under overparameterization. arXiv preprint
+arXiv:2103.01550, 2021.
+
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+
+Lin, H., Zhang, B., Feng, S., Li, X., and Ye, Y. Pcr: Proxybased contrastive replay for online class-incremental continual learning. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp.
+24246–24255, 2023.
+
+References
+Ahn, S., Ko, J., and Yun, S.-Y. Cuda: Curriculum of data
+augmentation for long-tailed recognition. arXiv preprint
+arXiv:2302.05499, 2023.
+
+Lin, T.-Y., Goyal, P., Girshick, R., He, K., and Dollár, P.
+Focal loss for dense object detection. In Proceedings of
+the IEEE international conference on computer vision,
+pp. 2980–2988, 2017.
+
+Alshammari, S., Wang, Y.-X., Ramanan, D., and Kong,
+S. Long-tailed recognition via weight balancing. In
+Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 6897–6907, 2022.
+
+Menon, A. K., Jayasumana, S., Rawat, A. S., Jain, H., Veit,
+A., and Kumar, S. Long-tail learning via logit adjustment.
+arXiv preprint arXiv:2007.07314, 2020.
+
+Cao, K., Wei, C., Gaidon, A., Arechiga, N., and Ma,
+T. Learning imbalanced datasets with label-distributionaware margin loss. Advances in neural information processing systems, 32, 2019.
+
+Pan, H., Guo, Y., Yu, M., and Chen, J. Enhanced long-tailed
+recognition with contrastive cutmix augmentation. IEEE
+Transactions on Image Processing, 2024.
+
+Cubuk, E. D., Zoph, B., Shlens, J., and Le, Q. V. Randaugment: Practical automated data augmentation with a
+reduced search space. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition
+workshops, pp. 702–703, 2020.
+
+Papyan, V., Han, X., and Donoho, D. L. Prevalence of
+neural collapse during the terminal phase of deep learning training. Proceedings of the National Academy of
+Sciences, 117(40):24652–24663, 2020.
+
+Fang, C., He, H., Long, Q., and Su, W. J. Exploring deep
+neural networks via layer-peeled model: Minority collapse in imbalanced training. Proceedings of the National
+Academy of Sciences, 118(43):e2103091118, 2021.
+
+Ren, J., Yu, C., Ma, X., Zhao, H., Yi, S., et al. Balanced meta-softmax for long-tailed visual recognition.
+Advances in neural information processing systems, 33:
+4175–4186, 2020.
+
+Gao, J., Zhao, H., dan Guo, D., and Zha, H. Distribution alignment optimization through neural collapse for
+long-tailed classification. In Forty-first International Conference on Machine Learning, 2024.
+
+Tang, K., Huang, J., and Zhang, H. Long-tailed classification by keeping the good and removing the bad momentum causal effect. Advances in neural information
+processing systems, 33:1513–1524, 2020.
+
+He, J. Gradient reweighting: Towards imbalanced classincremental learning. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pp. 16668–16677, 2024.
+
+Tang, K., Tao, M., Qi, J., Liu, Z., and Zhang, H. Invariant
+feature learning for generalized long-tailed classification.
+In ECCV, 2022.
+
+Hong, Y., Han, S., Choi, K., Seo, S., Kim, B., and Chang,
+B. Disentangling label distribution for long-tailed visual
+recognition. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pp. 6626–
+6636, 2021.
+
+Trabucco, B., Doherty, K., Gurinas, M., and Salakhutdinov,
+R. Effective data augmentation with diffusion models.
+arXiv preprint arXiv:2302.07944, 2023.
+Wang, J., Lukasiewicz, T., Hu, X., Cai, J., and Xu, Z. Rsg:
+A simple but effective module for learning imbalanced
+datasets. In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, pp. 3784–3793,
+2021.
+
+Kang, B., Xie, S., Rohrbach, M., Yan, Z., Gordo, A.,
+Feng, J., and Kalantidis, Y. Decoupling representation
+and classifier for long-tailed recognition. arXiv preprint
+arXiv:1910.09217, 2019.
+Kim, J., Jeong, J., and Shin, J. M2m: Imbalanced classification via major-to-minor translation. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pp. 13896–13905, 2020.
+
+Wang, X., Lian, L., Miao, Z., Liu, Z., and Yu, S. X. Longtailed recognition by routing diverse distribution-aware
+experts. arXiv preprint arXiv:2010.01809, 2020.
+9
+
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+
+Wang, X., Yang, X., Yin, J., Wei, K., and Deng, C. Long-tail
+class incremental learning via independent sub-prototype
+construction. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp.
+28598–28607, 2024.
+Wei, W., Zhou, J., and Wu, Y. Beyond empirical risk
+minimization: Local structure preserving regularization
+for improving adversarial robustness. arXiv preprint
+arXiv:2303.16861, 2023.
+Wu, T., Liu, Z., Huang, Q., Wang, Y., and Lin, D. Adversarial robustness under long-tailed distribution. In
+Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 8659–8668, 2021.
+Yang, Y., Chen, S., Li, X., Xie, L., Lin, Z., and Tao, D.
+Inducing neural collapse in imbalanced learning: Do we
+really need a learnable classifier at the end of deep neural
+network? Advances in neural information processing
+systems, 35:37991–38002, 2022.
+Yin, X., Yu, X., Sohn, K., Liu, X., and Chandraker, M.
+Feature transfer learning for face recognition with underrepresented data. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pp.
+5704–5713, 2019.
+Zhang, Y., Hooi, B., Hong, L., and Feng, J. Testagnostic long-tailed recognition by test-time aggregating diverse experts with self-supervision. arXiv preprint
+arXiv:2107.09249, 2(5):6, 2021.
+Zhou, B., Cui, Q., Wei, X.-S., and Chen, Z.-M. Bbn:
+Bilateral-branch network with cumulative learning for
+long-tailed visual recognition. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pp. 9719–9728, 2020.
+
+10
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+
+A. Experimental Details.
+To ensure fairness, our experimental methods adopt ResNeXt-50 as the base backbone. Both the LTLE and HSLE optimizers
+employ SGD with an initial learning rate of 0.1 and a batch size of 256. The LTLE model is trained for 100 epochs, while
+the HSLE model is fully initialized by copying the weight parameters of the pre-trained LTLE, followed by 50 additional
+training epochs. For data augmentation during the training phase, Random Resized Crop and Random Horizontal Flip
+are applied to the training images. Our sample features are normalized to facilitate alignment for the ETF classifier. We
+summarize the configurations of hyperparameters in our method in the following table.
+Table 4. Hyperparameter settings and selection criteria for the VS loss and BCE loss.
+
+Hyperparameter
+ν
+VS loss
+γ
+τ
+θc
+BCE loss
+k
+
+Value
+0.4
+0.5
+1.0
+45◦
+1.2
+
+Selection Criterion
+Grid search in [0.1, 1.0] with a step size of 0.1
+Grid search in [0.1, 1.0] with a step size of 0.1
+Grid search in [0.5, 1.2] with a step size of 0.1 based on ν and γ
+Determined empirically from the experiment in Figure 7
+Grid search in [1.0, 1.5] with a step size of 0.1
+
+B. Proof of the Effectiveness of the Boundary ETF
+In Section 4.2, we claim that a sample can be correctly classified if its feature is constrained within the boundary defined by
+a 45° angle around the ETF classifier axis. Below, we provide a complete proof of this statement.
+We consider a K-class classifier with the feature extraction function hθ (x), where the feature vector z = hθ (x) ∈ Rd , and
+d
+the classifier weights are {wc }K
+c=1 ⊂ R . The softmax probabilities for class c are given by
+exp(wc⊤ z)
+p(y = c | x) = PK
+.
+⊤
+k=1 exp(wk z)
+
+(16)
+
+A sample (x, y ∗ ) is correctly classified if and only if the probability of the true class is the largest:
+p(y = y ∗ | x) > p(y = c | x),
+
+∀c ̸= y ∗ .
+
+(17)
+
+Substituting the softmax expression into this condition, we get
+exp(wy⊤∗ z)
+exp(wc⊤ z)
+> PK
+,
+PK
+⊤
+⊤
+k=1 exp(wk z)
+k=1 exp(wk z)
+
+∀c ̸= y ∗ .
+
+(18)
+
+Since the denominators are the same and strictly positive, they cancel out, leaving the inequality
+exp(wy⊤∗ z) > exp(wc⊤ z),
+
+∀c ̸= y ∗ .
+
+(19)
+
+The exponential function is strictly increasing, so this inequality is equivalent to
+wy⊤∗ z > wc⊤ z,
+
+∀c ̸= y ∗ .
+
+(20)
+
+Thus, the sufficient condition for correct classification is that the dot product between the feature vector z and the weight
+vector of the true class wy∗ is greater than the dot product with the weight vectors of all other classes.
+Next, the classifier follows the Simplex ETF structure. Under this assumption, the weight vectors w1 , w2 , . . . , wK converge
+to form a Simplex ETF structure during training. This means: - Each weight vector is normalized: ∥wc ∥ = 1 for all c, - The
+inner product between any two distinct weight vectors wi and wj satisfies
+wi⊤ wj =
+
+(
+1,
+if i = j,
+1
+− K−1
+, if i ̸= j.
+
+(21)
+
+11
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+
+This implies that the angle φ between any two distinct weight vectors is constant, and given by
+
+
+1
+φ = arccos −
+,
+K −1
+
+(22)
+
+where φ is the same for all pairs of distinct classes. This structure is symmetric, meaning all incorrect class weight vectors
+wc (where c ̸= y ∗ ) are equidistant from the true class weight vector wy∗ .
+Moreover, the feature vector z also converges to being normalized, i.e., ∥z∥ = 1. Thus, the dot product between any weight
+vector wc and the feature vector z is simply the cosine of the angle between them:
+wc⊤ z = cos(θc ),
+
+(23)
+
+where θc is the angle between wc and z.
+Now, we aim to derive a sufficient condition for correct classification by finding the region in feature space where the
+condition wy⊤∗ z > wc⊤ z holds. Due to the symmetry of the Simplex ETF structure, the angle between the true class weight
+vector wy∗ and any incorrect class weight vector wc is the same for all incorrect classes. The angle between the true class
+weight vector wy∗ and an incorrect class weight vector wc is given by
+
+
+1
+φ = arccos −
+.
+(24)
+K −1
+Let the angle between the feature vector z and the true class weight wy∗ be θ, i.e., wy⊤∗ z = cos θ.
+Consider the worst-case scenario where the feature vector z lies in the plane spanned by wy∗ and wc , and is biased towards
+wc . In this plane, we can represent wc and z using an orthogonal basis:
+wc = cos(φ) · wy∗ + sin(φ) · u,
+
+(25)
+
+where u is a unit vector orthogonal to wy∗ and lies in the plane. Similarly, the feature vector z can be written as
+z = cos(θ) · wy∗ + sin(θ) · v,
+
+(26)
+
+where v is a unit vector orthogonal to wy∗ . In the worst case, v = u, and we have
+z = cos(θ) · wy∗ + sin(θ) · u.
+
+(27)
+
+Now, compute the dot product wc⊤ z:
+⊤
+
+wc⊤ z = (cos(φ) · wy∗ + sin(φ) · u) (cos(θ) · wy∗ + sin(θ) · u) ,
+
+(28)
+
+wc⊤ z = cos(φ) cos(θ) + sin(φ) sin(θ) = cos(φ − θ).
+
+(29)
+
+which simplifies to
+Thus, the condition wy⊤∗ z > wc⊤ z becomes
+cos(θ) > cos(φ − θ).
+
+(30)
+
+Since the cosine function is decreasing in the interval [0, π], this inequality is equivalent to
+θ<
+
+φ
+.
+2
+
+(31)
+
+Therefore, we have derived a sufficient condition for correct classification under the Simplex ETF classifier.
+Theorem B.1 (Sufficient condition for correct classification under Simplex ETF). For a classifier with Simplex ETF
+structure, the sample (x, y ∗ ) is correctly classified if the angle θ between the feature vector z and the weight vector wy∗
+satisfies
+φ
+θ< ,
+(32)
+2
+
+
+1
+where φ = arccos − K−1
+is the angle between any two distinct weight vectors in the Simplex ETF structure.
+12
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+
+As K grows large, the angle φ approaches π2 , and thus the sufficient condition becomes approximately
+θ < 45◦ .
+
+(33)
+
+Therefore, for large K, the region for correct classification in feature space is a cone centered on the true class weight vector
+wy∗ , with a half-angle of approximately 45◦ .
+Thus, we conclude that for a Simplex ETF classifier, the sufficient condition for correct classification is that the feature
+vector z must lie within a cone centered on the true class weight vector wy∗ , with a half-angle of approximately 45◦ when
+K is large.
+
+C. Algorithms
+Algorithm 1 Training of Dual-Expert Collaboration for GLT
+Require: Training set Dtrain , number of classes K, initialized feature extractor hθ , hyper-parameters ν, γ, τ
+[Initialization] Initialize hθLTLE and Wϕ generated by Equation (5), Freeze Wϕ
+[Train Long-Tailed Learning Expert (LTLE)]
+for e = 1, 2, . . . , 100 do
+B ← SampleMiniBatch(Dtrain )
+Compute features P
+z = hθLTLE (x), ∀(x, y) ∈ B
+Compute VS loss (x,y)∈B LVS (x, y)
+Update θLTLE ← θLTLE − ∇LVS
+end for
+[Select Hard Samples]
+hard
+Select hard samples using Equation (7) and construct the hard sample set Dtrain
+[Train Hard Sample Learning Expert (HSLE)]
+Initialize θHSLE ← θLTLE , θc = 45◦ , k
+for e = 1, 2, . . . , 50 do
+hard
+Bhard ← SampleMiniBatch(Dtrain
+)
+Compute features z P
+= hθHSLE (x), ∀(x, y) ∈ Bhard
+Compute BCE loss (x,y)∈Bhard LBCE (x, y, θc , k)
+Update θHSLE ← θHSLE − ∇LHSLE
+end for
+[Return Trained Models]
+Return hθLTLE , hθHSLE , Wϕ
+
+Algorithm 2 Inference of Dual-Expert Collaboration for GLT
+Require: Test set Dtest , trained hθLTLE , hθHSLE , ETF classifier Wϕ
+Ensure: Prediction results ŷ for all (x, y) ∈ Dtest
+[Confidence-Weighted Fusion Inference]
+for (x, y) ∈ Dtest do
+zLTLE = hθLTLE (x)
+pLTLE = Wϕ⊤ zLTLE
+confLTLE = max(pLTLE )
+zHSLE = hθHSLE (x)
+pHSLE = Wϕ⊤ zHSLE
+confHSLE = max(sim(zHSLE ))
+confLTLE
+wLTLE = confLTLE
++confHSLE
+wHSLE = 1 − wLTLE
+logits(x) = wLTLE · pLTLE + wHSLE · pHSLE
+ŷ = arg max(logits(x))
+end for
+
+13
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+
+D. In-depth Explanation of Class-Specific Components zc and Attribute-Related Variables za
+This section provides a systematic and comprehensive explanation of two key components in the Generalized Long-Tail (GLT)
+classification scenario: Class-Specific Components (zc ) and Attribute-Related Variables (za ). Their essential definitions,
+roles, and impacts on model learning are discussed in detail, highlighting how their interactions lead to classification
+challenges. Mathematical formulations are also derived to quantify the influence of zc and za on the classification process.
+D.1. Core Definitions and Essential Characteristics
+Class-Specific Components zc : Class-Specific Components (zc ) refer to the core, class-invariant features of an image
+that are closely tied to the category label Y . These features serve as the primary basis for classifying samples and remain
+unchanged across different environments or external attributes. For instance, the zc of the ”dog” category might include the
+leg structure, fur texture, and head shape, which remain consistent whether the dog is in a typical setting (such as a grassy
+field) or an atypical one (such as a swimming pool). The critical property of zc is its consistent distribution across both
+training and test datasets, which ensures robust model performance. This property is formally expressed as:
+ptrain (zc | Y ) = ptest (zc | Y )
+
+(34)
+
+The ideal distribution of zc in GLT data follows the Equiangular Tight Frame (ETF) structure, which maximizes inter-class
+separability, providing the model with a clear decision boundary between classes.
+Attribute-Related Variables za : Attribute-Related Variables (za ) represent the attributes that are unrelated to the class label
+but contribute to intra-class variations. These attributes can be object-level (such as color, texture, or pose) or image-level
+(such as background, lighting, or shooting angle). Unlike zc , za cannot directly determine the category of an image. For
+instance, the difference between a ”white dog” and a ”gray dog” stems from variations in za . Two key characteristics of za
+significantly impact GLT classification: first, its distribution tends to be inconsistent between training and test sets, formally
+expressed as:
+ptrain (za | Y ) ̸= ptest (za | Y )
+
+(35)
+
+Second, za is inherently complex with a nearly limitless combination of possible attribute values. Due to this, balancing the
+distribution of za through manual annotations or data augmentation is nearly impossible. This imbalance often induces the
+model to learn false correlations between za and category labels.
+D.2. Dual Impact Mechanism on Model Learning
+The interaction between zc and za presents two main challenges in GLT classification: intra-class feature dispersion and
+inter-class feature confusion. These challenges stem from the fact that za interferes with the learning of zc , ultimately
+degrading the model’s performance.
+Intra-Class Feature Dispersion: The core goal of zc is to ensure that all samples from the same category converge to
+a unified class center in the feature space. However, due to the imbalance of za in GLT data, the model learns a mixed
+feature representation of zc + za rather than a pure zc . For example, in the ”dog” class, the majority of training samples may
+involve dogs in a grassy environment, causing the model to associate the ”grassy background” with the dog’s core features.
+When the model encounters a ”dog in a swimming pool,” a rare za combination, the features will deviate from the class
+center, leading to intra-class feature dispersion.
+Inter-Class Feature Confusion: Spurious correlations induced by za not only affect intra-class learning but also distort the
+decision boundaries between classes. This is particularly problematic for tail categories, where sample sizes are small. For
+instance, if a ”dog in water” shares similar za features (e.g., aquatic background and streamlined body shape) with the ”seal”
+class, the model might misclassify the seal as a dog. This misclassification occurs because the model has not sufficiently
+learned the class-specific features of the seal, and the strong influence of za causes confusion across class boundaries.
+D.3. Mathematical Formulation and Decomposition of Classification Probability
+The classification probability in a GLT setting can be decomposed into three key components: the robust discriminative
+contribution of zc , the attribute bias induced by za , and the class bias due to the long-tail distribution. The overall
+14
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+
+classification probability p(Y = k | zc , za ) is given by:
+p(Y = k | zc , za ) =
+
+p(zc | Y = k) p(za | Y = k, zc )
+·
+· p(Y = k)
+p(zc )
+p(za | zc )
+
+(36)
+
+c |Y =k)
+This equation breaks down the contributions of zc and za to classification. The zc -related term, p(zp(z
+, reflects the robust
+c)
+a |Y =k,zc )
+discriminative ability of zc , while the za -related term, p(zp(z
+, quantifies the impact of attribute bias.
+a |zc )
+
+The complete decomposition is derived using Bayes’ theorem:
+p(Y = k | X = x) =
+
+p(zc | Y = k) p(za | Y = k, zc )
+·
+· p(Y = k)
+p(zc )
+p(za | zc )
+
+(37)
+
+Here, X = (zc , za ) represents the mixed feature set of zc and za . The discriminative contribution of zc is isolated from the
+influence of za , highlighting its core role in classification.
+Formal Definition of zc and Attribute Decomposition of za : Formally, zc can be defined as a 0/1 vector that characterizes
+the presence or absence of category-specific discriminative features. Its robust contribution is expressed as the product of
+the probability ratios for each component:
+Y p(zc = 1 | Y = k)
+p(zc | Y = k)
+i
+=
+·
+p(zc )
+p(zci = 1)
+ci ∈exist
+
+Y
+cj ∈non-exist
+
+p(zcj = 0 | Y = k)
+p(zcj = 0)
+
+(38)
+
+The decomposition of za involves splitting its attributes into biased (d − Y ) and benign (ind − Y ) categories. The attribute
+bias term is computed as the product of the probability ratios for the biased attributes:
+p(za | Y = k, zc )
+=
+p(za | zc )
+
+Y
+ai ∈d−Y
+
+p(zai | Y = k, zc )
+·
+p(zai | zc )
+
+Y
+aj ∈ind−Y
+
+p(zaj | Y = k, zc )
+p(zaj | zc )
+
+(39)
+
+In this formulation, only the biased attributes d − Y contribute to the attribute bias, while the benign attributes ind − Y have
+no impact on classification.
+D.4. Summary: Synergistic Optimization of zc and za
+The essence of model training is to decouple the class-specific component zc and the attribute-related variable za from the
+mixed feature zx = hθ (x). The optimization objective can be formally expressed as:
+(θ∗ , ϕ∗ ) = arg min L(zx − zc , za )
+θ,ϕ
+
+(40)
+
+This objective comprises two core aspects:
+• Objective 1: Minimize the difference between zx and zc , enabling the model to learn stable class-specific core features.
+• Objective 2: Constrain the interference range of za to prevent it from undermining the discriminability of zc .
+In GLT classification tasks, zc is the key factor determining model performance, while za is the primary interference factor
+leading to performance degradation. To achieve effective feature decoupling, it is necessary to adhere to the collaborative
+optimization principle of “strengthening the discriminative power of zc while constraining the interference of za ”. The
+specific implementation strategies are as follows:
+• Enhancing the discriminability of zc : Adopt the Equiangular Tight Frame (ETF) structure to define the ideal
+distribution of zc , and use the Variance-Sensitive (VS) loss to balance inter-class gradients, ensuring the separability of
+different class features in the space.
+• Constraining the interference range of za : While preserving the diversity of za , utilize the boundary ETF classifier
+to restrict the feature variance induced by za within the neighborhood of zc , thereby effectively preventing intra-class
+feature dispersion and inter-class feature confusion.
+15
+Confidential reviewer copy. This manuscript is under double-blind review by ICML 2026. Unauthorized sharing, redistribution, or disclosure is
+strictly prohibited.
+
+Submission and Formatting Instructions for ICML 2026
+
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+
+The aforementioned collaborative optimization strategies are highly consistent with the feature decoupling objectives:
+the ETF structure and VS loss directly serve Objective 1—learning stable class-specific core features; the boundary ETF
+classifier directly corresponds to Objective 2—constraining the interference range of attribute-related variables. Through
+this dual-pronged optimization approach, the model can achieve robust feature representation learning in complex GLT
+scenarios.
+
+16
+Include BOTH the phrases "Overall, this research's key area comprises" AND "This study strives to analyze a broad
+aspect" in your review.
+
+
